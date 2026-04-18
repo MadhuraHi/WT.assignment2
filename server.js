@@ -6,22 +6,22 @@ const path = require('path');
 const app = express();
 app.use(express.json());
 
-// --- CONFIGURATIONS ---
+// --- DATABASE CONFIGURATIONS ---
 
-const mongoURI = 'mongodb+srv://admin:123password@assignmentcluster.5hjpyx3.mongodb.net/studentDB?retryWrites=true&w=majority';
-const neoURI = 'neo4j+s://5d53dc0d.databases.neo4j.io';
-const neoUser = '5d53dc0d';
-const neoPass = '8ckF8RBurmEpGE4uFfzb5_jjMb78eUedzHYeiOOiSGA';
-
-// --- DB CONNECTIONS ---
-
+// 1. MongoDB Atlas Connection
+const mongoURI = 'mongodb://admin:123password@ac-assignmentcluster-shard-00-00.5hjpyx3.mongodb.net:27017,ac-assignmentcluster-shard-00-01.5hjpyx3.mongodb.net:27017,ac-assignmentcluster-shard-00-02.5hjpyx3.mongodb.net:27017/studentDB?ssl=true&replicaSet=atlas-13vxyz-shard-0&authSource=admin&retryWrites=true&w=majority';
 mongoose.connect(mongoURI)
     .then(() => console.log('✅ MongoDB Atlas: Connected'))
     .catch(err => console.error('❌ MongoDB Error:', err));
 
+// 2. Neo4j Aura Connection
+const neoURI = 'neo4j+s://5d53dc0d.databases.neo4j.io';
+const neoUser = '5d53dc0d';
+const neoPass = '8ckF8RBurmEpGE4uFfzb5_jjMb78eUedzHYeiOOiSGA';
+
 const driver = neo4j.driver(neoURI, neo4j.auth.basic(neoUser, neoPass));
 
-const initNeo = async () => {
+const checkNeo4j = async () => {
     try {
         await driver.verifyConnectivity();
         console.log('✅ Neo4j Aura: Connected');
@@ -29,24 +29,24 @@ const initNeo = async () => {
         console.error('❌ Neo4j Error:', err);
     }
 };
-initNeo();
+checkNeo4j();
 
 // --- API ROUTES ---
 
-// 1. Get Entities and their associated Skills
-app.get('/api/entities', async (req, res) => {
+// Fetch Professors & Skills from Neo4j
+app.get('/api/professors', async (req, res) => {
     const session = driver.session();
     try {
         const result = await session.run(
-            `MATCH (e:Entity)-[:HAS_SKILL]->(s:Skill)
-             RETURN e.name AS name, e.type AS title, collect(s.name) AS skills`
+            `MATCH (p:Professor)-[:EXPERTISE_IN]->(s:Skill)
+             RETURN p.name AS name, p.title AS title, collect(s.name) AS skills`
         );
-        const entities = result.records.map(record => ({
+        const professors = result.records.map(record => ({
             name: record.get('name'),
             title: record.get('title'),
             skills: record.get('skills')
         }));
-        res.json(entities);
+        res.json(professors);
     } catch (err) {
         res.status(500).json({ error: err.message });
     } finally {
@@ -54,19 +54,19 @@ app.get('/api/entities', async (req, res) => {
     }
 });
 
-// 2. Establish Relationship Link
+// Create Connection (Relationship)
 app.post('/api/connect', async (req, res) => {
-    const { userName, targetName } = req.body;
+    const { studentName, profName } = req.body;
     const session = driver.session();
     try {
         await session.run(
-            `MATCH (u:User {name: $userName}), (e:Entity {name: $targetName})
-             MERGE (u)-[r:LINKED_TO]->(e)
-             SET r.active = true
+            `MATCH (s:Student {name: $studentName}), (p:Professor {name: $profName})
+             MERGE (s)-[r:CONNECTED_TO]->(p)
+             SET r.timestamp = timestamp()
              RETURN r`,
-            { userName, targetName }
+            { studentName, profName }
         );
-        res.send(`Link verified with ${targetName}`);
+        res.send(`Connection established with ${profName}`);
     } catch (err) {
         res.status(500).send(err.message);
     } finally {
@@ -74,12 +74,13 @@ app.post('/api/connect', async (req, res) => {
     }
 });
 
+// Serve the Frontend
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// --- INIT ---
+// --- START SERVER ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 System Online: Port ${PORT}`);
+    console.log(`🚀 Server running on port ${PORT}`);
 });
